@@ -1,4 +1,4 @@
-# tsp-fast-solver-codingwizard34: Graph Algorithms in Production (TSP)
+# tsp-fast-cpp: Graph Algorithms in Production (TSP)
 
 A high-performance implementation of the Traveling Salesperson Problem (TSP) brute-force solver comparing pure Python against native C++ wrapped with Cython.
 
@@ -81,7 +81,7 @@ python setup.py build_ext --inplace
 ```bash
 pip install .
 # Or once published:
-pip install tsp-fast-solver-codingwizard34
+pip install tsp-fast-cpp
 ```
 
 ### 2. Python API
@@ -155,7 +155,7 @@ When prompted:
 
 In a clean virtual environment:
 ```bash
-pip install tsp-fast-solver-codingwizard34
+pip install tsp-fast-cpp
 python -c "import tsp_fast_solver; print('Success! tsp-fast-solver loaded version:', tsp_fast_solver.__version__)"
 ```
 
