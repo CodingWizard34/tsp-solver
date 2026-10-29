@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0", "cython"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tsp-fast-solver"
+version = "0.1.0"
+authors = [
+    { name = "Developer", email = "developer@example.com" }
+]
+description = "A blazing fast C++ TSP solver wrapped in Cython"
+readme = "README.md"
+requires-python = ">=3.8"
+keywords = ["tsp", "graph-algorithms", "cython", "cplusplus", "combinatorial-optimization"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: C++",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
