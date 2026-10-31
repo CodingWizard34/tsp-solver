@@ -11,6 +11,7 @@ __pycache__/
 
 # Cython generated C/C++ files
 tsp_fast_solver/_tsp_cython.cpp
+dijkstra_router/dijkstra_fast_cpp/_dijkstra_cython.cpp
 
 # Distribution / packaging
 .Python
