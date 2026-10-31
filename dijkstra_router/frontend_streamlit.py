@@ -84,6 +84,10 @@ if "Real-World" in mode:
     origin_name = st.sidebar.selectbox("Start Location", landmarks, index=0) # UPES Bidholi
     dest_name = st.sidebar.selectbox("Destination", landmarks, index=7)     # Premnagar
 
+    if origin_name == dest_name:
+        st.warning("⚠️ Origin and Destination are identical. Please select different locations.")
+        st.stop()
+
     # Cache graph
     @st.cache_resource
     def load_real_graph():
