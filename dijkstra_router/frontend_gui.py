@@ -187,11 +187,23 @@ class DijkstraMapApp(tk.Tk):
         self.lbl_dist.config(text=f"Driving Distance: {dist_km:.2f} km")
         self.total_dist_display = dist_km
 
-        # Populate Directions
-        directions = self.real_graph.generate_directions(self.path_indices)
+        # Populate Directions and Landmarks
+        routes = self.real_graph.discover_all_routes(u_idx, v_idx, self.fast_g)
         self.dir_text.delete("1.0", tk.END)
-        for idx, s in enumerate(directions):
-            self.dir_text.insert(tk.END, f"{idx + 1}. {s['instruction']}\n   -> {s['distance_km']} km (towards {s['heading']})\n\n")
+
+        if routes:
+            self.dir_text.insert(tk.END, f"=== EXPLORED ROUTES ({len(routes)} Candidates) ===\n")
+            for r in routes:
+                status = "🏆 OPTIMAL" if r['is_optimal'] else f"+{r['delta_km']} km"
+                self.dir_text.insert(tk.END, f"• {r['name']}\n  Distance: {r['distance_km']} km [{status}]\n\n")
+
+            self.dir_text.insert(tk.END, "=== INTERMEDIATE LANDMARK NODES ===\n")
+            for lm in routes[0]['intermediate_landmarks']:
+                self.dir_text.insert(tk.END, f"📍 {lm['name']}\n   Node ID: #{lm['node_id']} | GPS: ({lm['lat']}, {lm['lon']})\n   At: {lm['distance_from_start_km']} km from start\n\n")
+
+            self.dir_text.insert(tk.END, "=== TURN-BY-TURN DIRECTIONS ===\n")
+            for idx, s in enumerate(routes[0]['directions']):
+                self.dir_text.insert(tk.END, f"{idx + 1}. {s['instruction']}\n   -> {s['distance_km']} km (towards {s['heading']})\n")
 
         self.draw_real_map(start_pt, end_pt)
 

@@ -1,8 +1,8 @@
 """
 frontend_streamlit.py: Web-based interactive dashboard for Dijkstra Map Routing.
-Supports real-world OpenStreetMap navigation (e.g. UPES to Premnagar, Dehradun)
-with interactive Leaflet map, turn-by-turn directions, Python vs Cython benchmarks,
-and JSON path export.
+Explores all possible routes between actual locations (e.g. UPES to Premnagar),
+ranks them by distance, identifies the most optimal shortest path, and highlights
+all intermediate landmark nodes with coordinates.
 """
 
 import sys
@@ -28,58 +28,63 @@ except ImportError:
 
 
 st.set_page_config(
-    page_title="Dijkstra Real-World Map Router — UPES to Premnagar",
+    page_title="Dijkstra Route Exploration — UPES to Premnagar",
     page_icon="🗺️",
     layout="wide"
 )
 
-# Custom header styling
+# Custom CSS styling
 st.markdown("""
 <style>
-    .metric-card {
-        background-color: #1e1e2e;
-        border-radius: 8px;
-        padding: 12px;
-        border-left: 4px solid #89b4fa;
-        margin-bottom: 10px;
+    .optimal-badge {
+        background-color: #a6e3a1;
+        color: #11111b;
+        padding: 4px 10px;
+        border-radius: 12px;
+        font-weight: bold;
+        font-size: 0.85em;
+        display: inline-block;
     }
-    .direction-step {
+    .alt-badge {
+        background-color: #fab387;
+        color: #11111b;
+        padding: 4px 10px;
+        border-radius: 12px;
+        font-weight: bold;
+        font-size: 0.85em;
+        display: inline-block;
+    }
+    .landmark-row {
+        background-color: #181825;
+        border-left: 4px solid #89b4fa;
         padding: 8px 12px;
-        border-radius: 6px;
-        background: #181825;
         margin-bottom: 6px;
-        border-left: 3px solid #a6e3a1;
+        border-radius: 6px;
         font-size: 0.9em;
     }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🗺️ Real-World Dijkstra Map Router")
-st.caption("C++ (Cython) vs. Pure Python Shortest Path Solver on OpenStreetMap Dehradun Road Network")
+st.title("🗺️ Dijkstra Multi-Route Explorer & Optimal Path Solver")
+st.caption("Explores all candidate corridors, identifies intermediate landmark nodes, and calculates the most optimal path on Dehradun Road Network")
 
-# Mode selector in sidebar
+# Mode selector
 mode = st.sidebar.radio(
     "Routing Mode",
-    ["📍 Real-World Map (Dehradun: UPES to Premnagar)", "🎲 Procedural Line-Intersection Grid"]
+    ["📍 Real-World Map (UPES to Premnagar & Dehradun)", "🎲 Procedural Line-Intersection Grid"]
 )
-
 
 # -------------------------------------------------------------
 # MODE 1: REAL-WORLD MAP (UPES TO PREMNAGAR)
 # -------------------------------------------------------------
 if "Real-World" in mode:
-    st.sidebar.header("📍 Trip Waypoints")
+    st.sidebar.header("📍 Trip Locations")
 
-    landmark_names = list(LANDMARKS.keys())
-    origin_name = st.sidebar.selectbox("Start Location", landmark_names, index=0)
-    dest_name = st.sidebar.selectbox("Destination", landmark_names, index=5) # Premnagar
+    landmarks = list(LANDMARKS.keys())
+    origin_name = st.sidebar.selectbox("Start Location", landmarks, index=0) # UPES Bidholi
+    dest_name = st.sidebar.selectbox("Destination", landmarks, index=7)     # Premnagar
 
-    add_stop = st.sidebar.checkbox("Add Intermediate Waypoint", value=False)
-    via_name = None
-    if add_stop:
-        via_name = st.sidebar.selectbox("Via Stop", landmark_names, index=2) # Pondha
-
-    # Cache real road network
+    # Cache graph
     @st.cache_resource
     def load_real_graph():
         g = RealWorldMapGraph()
@@ -92,120 +97,144 @@ if "Real-World" in mode:
     real_graph, c_graph = load_real_graph()
 
     if not real_graph.loaded:
-        st.error("Real-world OSM road network could not be loaded. Please ensure data/dehradun_roads.json is present.")
+        st.error("OSM road network could not be loaded. Please check data/dehradun_roads.json.")
         st.stop()
 
-    # Resolve Landmark coordinates to nearest graph node
-    start_coord = LANDMARKS[origin_name]
-    end_coord = LANDMARKS[dest_name]
+    start_idx = real_graph.find_nearest_node(LANDMARKS[origin_name])
+    end_idx = real_graph.find_nearest_node(LANDMARKS[dest_name])
 
-    start_idx = real_graph.find_nearest_node(start_coord)
-    end_idx = real_graph.find_nearest_node(end_coord)
+    # Discover all candidate routes
+    routes = real_graph.discover_all_routes(start_idx, end_idx, c_graph)
 
-    waypoints_indices = [start_idx]
-    if add_stop and via_name and via_name not in [origin_name, dest_name]:
-        via_coord = LANDMARKS[via_name]
-        waypoints_indices.append(real_graph.find_nearest_node(via_coord))
-    waypoints_indices.append(end_idx)
+    if not routes:
+        st.error("No route found between the selected locations.")
+        st.stop()
 
-    # 1. Benchmark Cython C++ vs Pure Python
-    t0 = time.perf_counter()
-    if len(waypoints_indices) == 2:
-        py_dist, py_path, py_reach = dijkstra_python(
-            len(real_graph.osm_id_to_idx), real_graph.edges, start_idx, end_idx
-        )
-    else:
-        py_dist, py_path, py_reach = dijkstra_cover_waypoints_python(
-            len(real_graph.osm_id_to_idx), real_graph.edges, waypoints_indices
-        )
-    py_time_ms = (time.perf_counter() - t0) * 1000.0
+    optimal_route = routes[0]
 
-    if c_graph is not None:
-        t1 = time.perf_counter()
-        if len(waypoints_indices) == 2:
-            cy_dist, cy_path, cy_reach = c_graph.shortest_path(start_idx, end_idx)
-        else:
-            cy_dist, cy_path, cy_reach = c_graph.cover_waypoints(waypoints_indices)
-        cy_time_ms = (time.perf_counter() - t1) * 1000.0
-        speedup = py_time_ms / cy_time_ms if cy_time_ms > 0 else 1.0
+    # --- TOP METRIC BANNER ---
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Routes Explored", f"{len(routes)} Candidates")
+    m2.metric("Optimal Distance", f"{optimal_route['distance_km']:.2f} km", delta="Shortest Path")
+    m3.metric("Cython C++ Query Time", f"{optimal_route['cython_time_ms']:.3f} ms", delta=f"{optimal_route['speedup']} vs Python")
+    m4.metric("Road Nodes in Graph", f"{len(real_graph.osm_id_to_idx):,}")
 
-        active_path = cy_path
-        active_dist_m = cy_dist
-        active_reach = cy_reach
-    else:
-        cy_time_ms = 0.0
-        speedup = 1.0
-        active_path = py_path
-        active_dist_m = py_dist
-        active_reach = py_reach
+    st.markdown("---")
 
-    # Layout: Map on left (2.5), Directions & Stats on right (1.2)
-    col_map, col_info = st.columns([2.5, 1.2])
+    # Main columns: Left Map, Right Route comparison & intermediate locations
+    col_map, col_details = st.columns([2.2, 1.3])
 
-    with col_info:
-        st.subheader("⚡ Performance Delta")
-        dist_km = active_dist_m / 1000.0
+    with col_details:
+        st.subheader("📋 Explored Routes Comparison")
+        st.write("Dijkstra explores alternative network corridors to guarantee finding the most optimal path:")
 
-        m1, m2 = st.columns(2)
-        m1.metric("Distance", f"{dist_km:.2f} km")
-        m2.metric("Speedup", f"{speedup:.1f}x faster" if CYTHON_AVAILABLE else "N/A")
+        # Route Selection Radio
+        route_options = [
+            f"{'🏆 ' if r['is_optimal'] else '🔄 '}{r['name']} — {r['distance_km']} km ({'+0.0 km' if r['is_optimal'] else '+' + str(r['delta_km']) + ' km'})"
+            for r in routes
+        ]
+        selected_route_str = st.radio("Select Route to Inspect:", route_options, index=0)
+        selected_idx = route_options.index(selected_route_str)
+        active_route = routes[selected_idx]
 
-        st.metric("Pure Python (heapq)", f"{py_time_ms:.2f} ms")
-        if CYTHON_AVAILABLE:
-            st.metric("Cython C++ (FastGraph)", f"{cy_time_ms:.3f} ms")
+        st.markdown(f"**Description**: {active_route['description']}")
 
-        st.caption(f"Network: **{len(real_graph.osm_id_to_idx):,}** real nodes, **{len(real_graph.edges):,}** edges")
+        # Intermediate Locations Along Selected Route
+        st.subheader("📍 Important Intermediate Locations (Nodes)")
+        st.caption(f"Landmark checkpoints identified along {active_route['name'].split(':')[0]}:")
 
-        # Turn-by-turn directions
-        st.subheader("🧭 Turn-by-Turn Directions")
-        directions = real_graph.generate_directions(active_path)
-        with st.container(height=260):
-            if directions:
-                for idx, step in enumerate(directions):
+        landmarks_passed = active_route["intermediate_landmarks"]
+        if landmarks_passed:
+            with st.container(height=240):
+                for lm in landmarks_passed:
                     st.markdown(
-                        f"<div class='direction-step'>"
-                        f"<b>{idx + 1}.</b> {step['instruction']} "
-                        f"<span style='color: #89b4fa; float: right;'>{step['distance_km']} km</span>"
+                        f"<div class='landmark-row'>"
+                        f"<b>{lm['name']}</b><br>"
+                        f"<span style='color: #a6adc8;'>Node ID: <code>#{lm['node_id']}</code> | GPS: <code>{lm['lat']:.4f}, {lm['lon']:.4f}</code></span>"
+                        f"<span style='color: #a6e3a1; float: right;'>{lm['distance_from_start_km']} km</span>"
                         f"</div>",
                         unsafe_allow_html=True
                     )
-            else:
-                st.info("Direct route without road splits.")
+        else:
+            st.info("Direct route without intermediate landmarks.")
 
-        # Export to JSON
-        path_coords = [real_graph.get_node_coord(nid) for nid in active_path]
-        json_payload = {
+        # Turn-by-Turn Directions
+        with st.expander("🧭 View Turn-by-Turn Directions"):
+            for idx, s in enumerate(active_route["directions"]):
+                st.write(f"**{idx + 1}.** {s['instruction']} — `{s['distance_km']} km` ({s['heading']})")
+
+        # JSON Export Button
+        export_payload = {
             "origin": origin_name,
             "destination": dest_name,
-            "total_distance_km": round(dist_km, 3),
-            "total_nodes_traversed": len(active_path),
-            "runtime_benchmark": {
-                "python_ms": round(py_time_ms, 3),
-                "cython_ms": round(cy_time_ms, 3),
-                "speedup_factor": f"{speedup:.1f}x"
+            "explored_routes_count": len(routes),
+            "optimal_shortest_route": {
+                "route_name": optimal_route["name"],
+                "distance_km": optimal_route["distance_km"],
+                "node_count": optimal_route["node_count"],
+                "cython_time_ms": optimal_route["cython_time_ms"],
+                "python_time_ms": optimal_route["python_time_ms"],
+                "speedup": optimal_route["speedup"]
             },
-            "turn_by_turn_directions": directions,
-            "path_gps_coordinates": [{"lat": lat, "lon": lon} for lat, lon in path_coords]
+            "all_explored_routes": [
+                {
+                    "route_id": r["id"],
+                    "name": r["name"],
+                    "distance_km": r["distance_km"],
+                    "delta_from_optimal_km": r["delta_km"],
+                    "is_optimal": r["is_optimal"],
+                    "node_count": r["node_count"],
+                    "intermediate_landmarks": r["intermediate_landmarks"],
+                    "path_gps_coordinates": [{"lat": lat, "lon": lon} for lat, lon in r["gps_coordinates"]]
+                }
+                for r in routes
+            ]
         }
-        json_str = json.dumps(json_payload, indent=2)
+        json_export_str = json.dumps(export_payload, indent=2)
 
         st.download_button(
-            label="💾 Export Real Path to JSON",
-            data=json_str,
-            file_name=f"route_{origin_name.split()[0]}_to_{dest_name.split()[0]}.json",
+            label="💾 Download All Routes & Landmarks (JSON)",
+            data=json_export_str,
+            file_name=f"all_routes_{origin_name.split()[0]}_to_{dest_name.split()[0]}.json",
             mime="application/json",
             use_container_width=True
         )
 
     with col_map:
-        st.subheader(f"🗺️ Real Route: {origin_name} ➔ {dest_name}")
+        st.subheader("🗺️ All Explored Routes on OpenStreetMap")
+        st.caption("🏆 **Cyan (Solid)** = Most Optimal Shortest Path | 🟧 **Orange / 🟪 Purple (Dashed)** = Alternative Routes")
 
-        # Extract lat/lon list for Leaflet Polyline
-        lat_lons = [[lat, lon] for lat, lon in path_coords]
+        # Construct Leaflet Map showing ALL routes simultaneously
+        start_coord = LANDMARKS[origin_name]
+        end_coord = LANDMARKS[dest_name]
         center_lat = (start_coord[0] + end_coord[0]) / 2.0
         center_lon = (start_coord[1] + end_coord[1]) / 2.0
 
-        # Construct Leaflet.js HTML with real OpenStreetMap tiles
+        routes_js_data = []
+        for r in routes:
+            routes_js_data.append({
+                "id": r["id"],
+                "name": r["name"],
+                "distance_km": r["distance_km"],
+                "is_optimal": r["is_optimal"],
+                "color": r["color"],
+                "dash": r["dash_array"],
+                "weight": 6 if r["id"] == active_route["id"] else 3.5,
+                "opacity": 0.95 if r["id"] == active_route["id"] else 0.65,
+                "coords": [[lat, lon] for lat, lon in r["gps_coordinates"]]
+            })
+
+        # Landmark checkpoints for pins
+        pins_data = []
+        for lm in active_route["intermediate_landmarks"]:
+            pins_data.append({
+                "name": lm["name"],
+                "node_id": lm["node_id"],
+                "lat": lm["lat"],
+                "lon": lm["lon"],
+                "km": lm["distance_from_start_km"]
+            })
+
         leaflet_html = f"""
         <!DOCTYPE html>
         <html>
@@ -215,7 +244,7 @@ if "Real-World" in mode:
             <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
             <style>
                 html, body {{ height: 100%; margin: 0; padding: 0; background: #11111b; }}
-                #map {{ width: 100%; height: 580px; border-radius: 8px; }}
+                #map {{ width: 100%; height: 600px; border-radius: 8px; }}
                 .leaflet-popup-content-wrapper {{ background: #181825; color: #cdd6f4; font-family: sans-serif; }}
                 .leaflet-popup-tip {{ background: #181825; }}
             </style>
@@ -225,51 +254,53 @@ if "Real-World" in mode:
             <script>
                 var map = L.map('map').setView([{center_lat}, {center_lon}], 12);
                 
-                // OpenStreetMap Standard Street Tile Layer
                 L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
                     maxZoom: 19,
                     attribution: '© OpenStreetMap contributors'
                 }}).addTo(map);
 
-                var routePoints = {json.dumps(lat_lons)};
+                var allRoutes = {json.dumps(routes_js_data)};
+                var boundsGroup = new L.featureGroup();
 
-                // Glowing Shortest Path Polyline
-                var pathPolyline = L.polyline(routePoints, {{
-                    color: '#00E5FF',
-                    weight: 6,
-                    opacity: 0.9,
-                    lineJoin: 'round'
-                }}).addTo(map);
+                // Draw all candidate routes
+                allRoutes.forEach(function(r) {{
+                    var polyOptions = {{
+                        color: r.color,
+                        weight: r.weight,
+                        opacity: r.opacity,
+                        lineJoin: 'round'
+                    }};
+                    if (r.dash) {{
+                        polyOptions.dashArray = r.dash;
+                    }}
+                    var poly = L.polyline(r.coords, polyOptions).addTo(map);
+                    poly.bindPopup("<b>" + r.name + "</b><br>Distance: <b>" + r.distance_km + " km</b><br>" + (r.is_optimal ? "<span style='color:#00E676;'>★ Shortest Optimal Path</span>" : "Alternative Route"));
+                    boundsGroup.addLayer(poly);
+                }});
 
-                // Start Marker (UPES)
-                var startMarker = L.circleMarker([{start_coord[0]}, {start_coord[1]}], {{
-                    radius: 9,
-                    fillColor: '#00E676',
-                    color: '#ffffff',
-                    weight: 2,
-                    fillOpacity: 1
-                }}).addTo(map).bindPopup("<b>🟢 Start: {origin_name}</b><br>{start_coord[0]:.4f}, {start_coord[1]:.4f}").openPopup();
+                // Draw intermediate landmark checkpoint pins
+                var pins = {json.dumps(pins_data)};
+                pins.forEach(function(p, i) {{
+                    var isStart = (i === 0);
+                    var isEnd = (i === pins.length - 1);
+                    var pinColor = isStart ? '#00E676' : (isEnd ? '#FF1744' : '#FFD600');
+                    var marker = L.circleMarker([p.lat, p.lon], {{
+                        radius: (isStart || isEnd) ? 9 : 6,
+                        fillColor: pinColor,
+                        color: '#ffffff',
+                        weight: 2,
+                        fillOpacity: 1
+                    }}).addTo(map);
+                    marker.bindPopup("<b>" + p.name + "</b><br>Node ID: <code>#" + p.node_id + "</code><br>Distance from Start: <b>" + p.km + " km</b><br>GPS: " + p.lat + ", " + p.lon);
+                }});
 
-                // Destination Marker (Premnagar)
-                var endMarker = L.circleMarker([{end_coord[0]}, {end_coord[1]}], {{
-                    radius: 9,
-                    fillColor: '#FF1744',
-                    color: '#ffffff',
-                    weight: 2,
-                    fillOpacity: 1
-                }}).addTo(map).bindPopup("<b>🔴 Destination: {dest_name}</b><br>{end_coord[0]:.4f}, {end_coord[1]:.4f}");
-
-                // Fit map to route bounds
-                if (routePoints.length > 0) {{
-                    map.fitBounds(pathPolyline.getBounds(), {{ padding: [30, 30] }});
-                }}
+                map.fitBounds(boundsGroup.getBounds(), {{ padding: [30, 30] }});
             </script>
         </body>
         </html>
         """
 
-        components.html(leaflet_html, height=600)
-
+        components.html(leaflet_html, height=620)
 
 # -------------------------------------------------------------
 # MODE 2: PROCEDURAL LINE-INTERSECTION GRID
