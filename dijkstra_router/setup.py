@@ -45,6 +45,6 @@ setup(
     packages=find_packages(),
     ext_modules=ext_modules,
     package_data={
-        "dijkstra_fast_cpp": ["*.h", "*.pxd", "*.pyx", "*.cpp"],
+        "dijkstra_fast_cpp": ["*.h", "*.pxd", "*.pyx", "*.cpp", "data/*.json"],
     },
 )
